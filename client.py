@@ -17,7 +17,7 @@ class Client:
         self.run()
 
     def run(self):
-        while self.action != Action.QUIT:
+        while self.action is not Action.QUIT:
             self.ask_action()
             if self.action is Action.RETRIEVE:
                 print("retrieving")
