@@ -1,6 +1,7 @@
 from replica_manager import ReplicaManager
 from client import Client
+from frontend_server import Frontend
 import Pyro4
 
-client = Client()
-rm = ReplicaManager("dataset/ratings.csv")
+front = Frontend()
+front2 = Frontend()

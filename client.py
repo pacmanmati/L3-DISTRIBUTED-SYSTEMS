@@ -1,19 +1,21 @@
 from enum import Enum, unique
-from frontend_server import Frontend
+import Pyro4
+
 @unique
 class Action(Enum):
     RETRIEVE = 1
     SUBMIT = 2
     NEW_ID = 3
     QUIT = 4
-    
+
+@Pyro4.expose
+@Pyro4.behavior(instance_mode="single")
 class Client:
     def __init__(self):
         self.id = -1
         self.movie_id = -1
         self.rating = -1
         self.action = Action.NEW_ID
-        self.frontend = Frontend()
         self.run()
 
     def run(self):
