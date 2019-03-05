@@ -8,8 +8,6 @@ class Action(Enum):
     NEW_ID = 3
     QUIT = 4
 
-@Pyro4.expose
-@Pyro4.behavior(instance_mode="single")
 class Client:
     def __init__(self):
         self.id = -1
@@ -47,3 +45,7 @@ class Client:
     def ask_rating(self):
         self.rating = input("Enter a rating (out of ten):").strip()
         return self.rating
+
+# create a frontend proxy
+frontend_uri = "PYROMETA:F"
+frontend = Pyro4.Proxy(frontend_uri)
