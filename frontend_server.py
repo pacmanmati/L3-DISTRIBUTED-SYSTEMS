@@ -3,9 +3,9 @@ import Pyro4
 
 @Pyro4.expose
 class Frontend:
-    def __init__(self, NameServer):
-        self.ns = NameServer
-        self.rm_list = self.map_replicas()
+    def __init__(self, nameserver):
+        self.ns = nameserver
+        self.replicas = self.map_replicas()
     def map_replicas(self):
         ''' Remap all replicas using information from the NameServer '''
         replicas = {}
@@ -17,17 +17,17 @@ class Frontend:
         ''' Returns an RM with minimal load '''
         min_load = 100
         ret_rm = None
-        for k,v in self.rm_list.items():
-            load = v.load()
+        for k,v in self.replicas.items():
+            load = v.load
             if load <= min_load:
                 min_load = load
                 min_load_rm = k
         return ret_rm if ret_rm != None else raise Exception("find_rm() returns None")
 
-    def query():
-        print("frontend running")
-    def update():
-        print("frontend running")
+    def query(self, rm, movieid):
+        rm.queue_query(movieid)
+    def update(self, rm, movieid, id, rating):
+        rm.queue_update(movieid, id, rating)
         
 with Pyro4.Daemon() as daemon:
     ns = Pyro4.locateNS()
