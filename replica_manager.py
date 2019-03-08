@@ -25,7 +25,7 @@ class ReplicaManager:
         self.update_queue = []
         self.replica_timestamp = self.init_timestamp()
         self.executed_ops = []
-        self.timestamp_table = self.init_timestamp()
+        self.timestamp_table = self.init_timestamp_table()
 
         self.read_file(filename)
         self.status = Status.ONLINE
@@ -43,6 +43,13 @@ class ReplicaManager:
         rms = self.ns.list(metadata_all=["RM"])
         for k in rms.keys():
             timestamp[k] = 0
+        return timestamp
+
+    def init_timestamp_table(self):
+        timestamp = {}
+        rms = self.ns.list(metadata_all=["RM"])
+        for k in rms.keys():
+            timestamp[k] = self.init_timestamp()
         return timestamp
 
     def merge_timestamp(self, t1, t2): # retain the values of t1 unless t2's are greater
@@ -88,7 +95,7 @@ class ReplicaManager:
     def get_entries(self, movie_id):
         entries = []
         for key, value in self.database.items():
-            if key[0] is movie_id:
+            if key[0] == movie_id.strip():
                 entries.append([key[0], key[1], value])
         return entries
 
@@ -101,15 +108,17 @@ class ReplicaManager:
         return ahead
     
     def query(self, movie_id, timestamp):
-        print("being queried")
+        #print(self.database[("1337","1")])
+        print("{} being queried".format(self.name))
         #while timestamp[self.name] > self.value_timestamp[self.name]: # while our replica is behind
         while not self.timestamp_test(self.value_timestamp, timestamp): # while value_timestamp is behind the frontend's timestamp
-            time.sleep(QUERY_SLEEP)
+            time.sleep(REQ_SLEEP)
         # once we're out, our query can be responded to
         return self.value_timestamp, self.get_entries(movie_id)
             
     def update(self, movie_id, user_id, rating):
-        self.database[movie_id, user_id] = rating
+        print("{} applying update: movie {} now has rating {} from user {}".format(self.name, movie_id, rating, user_id))
+        self.database[(movie_id, user_id)] = rating
         
     def queue_update(self, movie_id, user_id, rating, operation_id, timestamp):
         if operation_id not in self.executed_ops:
@@ -124,12 +133,14 @@ class ReplicaManager:
         safely_removable = []
         for k in self.value_timestamp.keys():
             for update in self.update_queue:
-                if not self.timestamp_test(self.timestamp_table[k][update[4]], update[3][update[4]]):
+                #if not self.timestamp_test(self.timestamp_table[k][update[4]], update[3][update[4]]):
+                if self.timestamp_table[k][update[4]] >= update[3][update[4]]:
                     safe_to_remove = False
                     break
                 if safe_to_remove:
                     safely_removable.append(update)
         for update in safely_removable:
+            print("removing", update)
             self.update_queue.remove(update)
 
     def merge_log(self, log_old, log_new): # merge log2 into log1
@@ -141,22 +152,25 @@ class ReplicaManager:
         # first we extract the stable updates
         stable_updates = []
         for update in self.update_queue:
-            if self.timestamp_test(self.value_timestamp, update[2]): # if update is stable
+            if self.timestamp_test(self.value_timestamp, update[3]) and update not in self.executed_ops: # if update is stable
                 stable_updates.append(update)
-        # now we order the updates
-        ordered_updates = []
+        # execute instructions in order
         while len(stable_updates) is not 0:
+            saved_i = 0
             min_ts = stable_updates[0][2]
-            min_upd = stable_updates[0]
             for i in range(len(stable_updates)):
-                #if stable_updates[i][2] <= min_ts:
                 if self.timestamp_test(min_ts, stable_updates[i][2]):
+                    saved_i = i
                     min_ts = stable_updates[i][2]
-                    min_ipd = stable_updates[i]
-            # we have the min
-            ordered_updates.append(min_upd) # [0] -> [...] increasing
+            # we have the min, remove it from stable updates  and exec it
+            update = stable_updates.pop(i)
+            if update not in self.executed_ops:
+                self.update(update[1][0], update[1][1], update[1][2]) # execute update
+                self.value_timestamp = self.merge_timestamp(self.value_timestamp, update[3]) # merge timestamps
+                self.executed_ops.append(update[0]) # add to executed operations        
             
     def gossip(self, log, replica_timestamp, name):
+        print("{} is receiving gossip from {}".format(self.name, name))
         print("starting merge")
         self.merge_log(self.update_queue, log)
         print("merged log")
@@ -165,16 +179,17 @@ class ReplicaManager:
         self.apply_stable_updates()
         print("applied updates")
         self.timestamp_table[name] = replica_timestamp
+        print("updated table")
         self.eliminate_records()
         print("eliminated records")
             
     def pick_random_gossip(self):
         others = []
         for k in self.value_timestamp.keys():
-            if k is not self.name:
+            if k.strip() != self.name.strip():
                 others.append(k)
         selection = others[random.randrange(len(others))]
-        print("my selection is {} i am {}".format(selection, self.name))
+        #print("my selection is {} i am {}".format(selection, self.name))
         lookup = self.ns.lookup(selection)
         return Pyro4.Proxy(lookup)
         
@@ -182,8 +197,10 @@ class ReplicaManager:
         print("Server {} online".format(self.name))
         while self.status is Status.ONLINE: # until the end of time
             if len(self.update_queue) is not 0:
+                print("{} doing replica loop".format(self.name))
+                #print(len(self.update_queue
                 self.do_updates()
-                print("done updates")
+                #print("done updates")
                 #time.sleep(random.random())
                 self.pick_random_gossip().gossip(self.update_queue, self.replica_timestamp, self.name)
                 print("returned")

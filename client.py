@@ -65,7 +65,7 @@ class Client:
         return self.action
 
     def ask_id(self):
-        self.user_id = input("What is your user_id?").strip()
+        self.user_id = input("What is your user_id?\n >").strip()
         return self.user_id
 
     def ask_movie_id(self):
