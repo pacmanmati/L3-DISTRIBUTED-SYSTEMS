@@ -8,7 +8,7 @@ class Action(Enum):
     NEW_ID = 3
     QUIT = 4
 
-Pyro4.config.COMMTIMEOUT = 1
+Pyro4.config.COMMTIMEOUT = 10
     
 class Client:
     def init(self, frontend):
