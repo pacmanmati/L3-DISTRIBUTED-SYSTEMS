@@ -23,7 +23,7 @@ class ReplicaManager:
         self.update_queue = []
         self.replica_timestamp = init_timestamp()
         self.executed_ops = []
-        self.timestamp_table = []
+        self.timestamp_table = init_timestamp()
         
         self.read_file(filename)
         self.status = Status.ONLINE
@@ -65,10 +65,14 @@ class ReplicaManager:
         return replicas
 
     def do_updates(self):
-        for update in update_queue:
+        for update in self.update_queue:
             if update[0] not in self.executed_ops:
-                while !timestamp_test(self.value_timestamp, update[2]): # while our rm is behind the update
-                    time.sleep(REQ_SLEEP)
+                #while !timestamp_test(self.value_timestamp, update[2]): # while our rm is behind the update
+                if !timestamp_test(self.value_timestamp, update[2]): # while our rm is behind the update
+                    continue # skip if it isn't stable
+                #     time.sleep(REQ_SLEEP)
+                # if update[0] in self.executed_ops:
+                #     continue
                 update(update[1][0], update[1][1], update[1][2])
                 #self.value_timestamp[self.name] += 1 # increment value timestamp
                 self.value_timestamp = merge_timestamp(self.value_timestamp, update[3]) # merge timestamps
@@ -104,17 +108,56 @@ class ReplicaManager:
             self.replica_timestamp[self.name] += 1 # increment replica timestamp
             our_ts = timestamp.copy()
             our_ts[self.name] = self.replica_timestamp[self.name]
-            update_queue.append((operation_id, (movie_id, user_id, rating), timestamp, our_ts))
+            update_queue.append((operation_id, (movie_id, user_id, rating), timestamp, our_ts, self.name))
+
+    def eliminate_records():
+        safe_to_remove = True
+        safely_removable = []
+        for k in self.replicas.keys():
+            for update in update_queue:
+                if !timestamp_test(self.timestamp_table[k][update[4]], update[3][update[4]]):
+                    safe_to_remove = False
+                    break
+                if safe_to_remove:
+                    safely_removable.append(update)
+        for update in safely_removable:
+            update_queue.remove(update)
 
     def merge_log(log_old, log_new): # merge log2 into log1
-        
+        for update in log_new:
+            if update not in log_old and !timestamp_test(self.replica_timestamp, update[3]):
+                log_old.append(update)
+
+    def apply_stable_updates():
+        # first we extract the stable updates
+        stable_updates = []
+        for update in update_queue:
+            if timestamp_test(self.value_timestamp, update[2]): # if update is stable
+                stable_updates.append(update)
+        # now we order the updates
+        ordered_updates = []
+        while len(stable_updates) is not 0:
+            min_ts = stable_updates[0][2]
+            min_upd = stable_updates[0]
+            for i in range(len(stable_updates)):
+                if stable_updates[i][2] <= min_ts:
+                    min_ts = stable_updates[i][2]
+                    min_ipd = stable_updates[i]
+            # we have the min
+            ordered_updates.append(min_upd) # [0] -> [...] increasing
             
-    def gossip(self, log, replica_timestamp):
+    def gossip(self, log, replica_timestamp, name):
         merge_log(self.log, log)
+        merge_timestamp(self.replica_timestamp, replica_timestamp)
+        apply_stable_updates()
+        self.timestamp_table[name] = replica_timestamp
+        eliminate_records()
+            
 
 def replica_loop(self):
     while True: # until the end of time
-        
+        do_updates()
+        time.sleep(BACKGROUND_SLEEP) # less frequent gossips and loops
 
     
 with Pyro4.Daemon() as daemon:
