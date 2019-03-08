@@ -8,6 +8,8 @@ class Action(Enum):
     NEW_ID = 3
     QUIT = 4
 
+Pyro4.config.COMMTIMEOUT = 10
+    
 class Client:
     def init(self, frontend):
 
@@ -35,20 +37,28 @@ class Client:
         while self.action is not Action.QUIT:
             if self.action is Action.QUERY:
                 self.ask_movie_id()
-                timestamp, name, value = self.frontend.query(self.movie_id, self.timestamp)
-                # merge timestamps
-                self.timestamp = self.merge_timestamp(self.timestamp, timestamp)
-                for entry in value:
-                    #print(entry)
-                    print("User with id {} gave movie {} a rating of {} stars".format(entry[1], entry[0], entry[2]))
+                try:
+                    timestamp, name, value = self.frontend.query(self.movie_id, self.timestamp)
+                    # merge timestamps
+                    self.timestamp = self.merge_timestamp(self.timestamp, timestamp)
+                    for entry in value:
+                        #print(entry)
+                        print("User with id {} gave movie {} a rating of {} stars".format(entry[1], entry[0], entry[2]))
+                except Pyro4.errors.TimeoutError:
+                    print("Timed out while communicating with the server, going back to the menu.")
+                    continue
             elif self.action is Action.UPDATE:
                 self.ask_movie_id()
                 self.ask_rating()
-                timestamp, name = self.frontend.update(self.movie_id, self.user_id, self.rating, self.timestamp)
-                # merge timestamps
-                print("self timestamp", self.timestamp)
-                print("received timestamp", timestamp)
-                self.timestamp = self.merge_timestamp(self.timestamp, timestamp)
+                try:
+                    timestamp, name = self.frontend.update(self.movie_id, self.user_id, self.rating, self.timestamp)
+                    # merge timestamps
+                    print("self timestamp", self.timestamp)
+                    print("received timestamp", timestamp)
+                    self.timestamp = self.merge_timestamp(self.timestamp, timestamp)
+                except Pyro4.errors.TimeoutError:
+                    print("Timed out while communicating with the server, going back to the menu.")
+                    continue                    
             elif self.action is Action.NEW_ID:
                 print("Your new id is {}.".format(self.ask_id()))
             self.ask_action()

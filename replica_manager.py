@@ -5,8 +5,16 @@ import threading
 import Pyro4
 import random
 
-BACKGROUND_SLEEP = 2.5
-REQ_SLEEP = 1.5
+BACKGROUND_SLEEP = 2
+REQ_SLEEP = 1
+
+# probabilities
+
+PROB_CRASH = 0.1
+PROB_OVERLOAD = 0.2
+PROB_REVERT = 0.4
+
+#Pyro4.config.COMMTIMEOUT = 10
 
 @unique
 class Status(Enum):
@@ -37,6 +45,9 @@ class ReplicaManager:
         # daemon.requestLoop()
         threading.Thread(target=daemon.requestLoop).start()
         self.replica_loop()
+
+    def get_status(self):
+        return self.status
         
     def init_timestamp(self):
         timestamp = {}
@@ -112,6 +123,8 @@ class ReplicaManager:
         print("{} being queried".format(self.name))
         #while timestamp[self.name] > self.value_timestamp[self.name]: # while our replica is behind
         while not self.timestamp_test(self.value_timestamp, timestamp): # while value_timestamp is behind the frontend's timestamp
+            print("own timestamp", self.value_timestamp)
+            print("fe timestamp", timestamp)
             time.sleep(REQ_SLEEP)
         # once we're out, our query can be responded to
         return self.value_timestamp, self.get_entries(movie_id)
@@ -123,36 +136,53 @@ class ReplicaManager:
     def queue_update(self, movie_id, user_id, rating, operation_id, timestamp):
         if operation_id not in self.executed_ops:
             self.replica_timestamp[self.name] += 1 # increment replica timestamp
+            self.timestamp_table[self.name] = self.replica_timestamp
             our_ts = timestamp.copy()
             our_ts[self.name] = self.replica_timestamp[self.name]
             self.update_queue.append((operation_id, (movie_id, user_id, rating), timestamp, our_ts, self.name))
-            return self.value_timestamp
+            #return self.value_timestamp
+            return our_ts
 
     def eliminate_records(self):
-        safe_to_remove = True
+        # safely_removable = []
+        # for k in self.value_timestamp.keys():
+        #     safe_to_remove = True
+        #     for update in self.update_queue:
+        #         #if not self.timestamp_test(self.timestamp_table[k][update[4]], update[3][update[4]]):
+        #         if self.timestamp_table[k][update[4]] >= update[3][update[4]]:
+        #             safe_to_remove = False
+        #             break
+        #         if safe_to_remove:
+        #             safely_removable.append(update)
         safely_removable = []
-        for k in self.value_timestamp.keys():
-            for update in self.update_queue:
-                #if not self.timestamp_test(self.timestamp_table[k][update[4]], update[3][update[4]]):
-                if self.timestamp_table[k][update[4]] >= update[3][update[4]]:
+        for update in self.update_queue:
+            safe_to_remove = True
+            for k in self.value_timestamp.keys():
+                if self.timestamp_table[k][update[4]] < update[3][update[4]]:
                     safe_to_remove = False
                     break
                 if safe_to_remove:
                     safely_removable.append(update)
-        for update in safely_removable:
+        for update in reversed(safely_removable):
             print("removing", update)
-            self.update_queue.remove(update)
+            try:
+                self.update_queue.remove(update)
+            except ValueError:
+                print("value already removed")
+                
 
     def merge_log(self, log_old, log_new): # merge log2 into log1
         for update in log_new:
-            if update not in log_old and not self.timestamp_test(self.replica_timestamp, update[3]):
+            #if update not in log_old and not self.timestamp_test(self.replica_timestamp, update[3]):
+            if self.timestamp_test(self.replica_timestamp, update[3]):
                 log_old.append(update)
+        return log_old
 
     def apply_stable_updates(self):
         # first we extract the stable updates
         stable_updates = []
         for update in self.update_queue:
-            if self.timestamp_test(self.value_timestamp, update[3]) and update not in self.executed_ops: # if update is stable
+            if self.timestamp_test(update[2], self.value_timestamp) and update not in self.executed_ops: # if update is stable
                 stable_updates.append(update)
         # execute instructions in order
         while len(stable_updates) is not 0:
@@ -170,18 +200,23 @@ class ReplicaManager:
                 self.executed_ops.append(update[0]) # add to executed operations        
             
     def gossip(self, log, replica_timestamp, name):
-        print("{} is receiving gossip from {}".format(self.name, name))
-        print("starting merge")
-        self.merge_log(self.update_queue, log)
-        print("merged log")
-        self.merge_timestamp(self.replica_timestamp, replica_timestamp)
-        print("merged timestamp")
+        #print("{} is receiving gossip from {}".format(self.name, name))
+        #print("starting merge")
+        self.update_queue = self.merge_log(self.update_queue, log)
+        print("LENGTH OF LOG", len(self.update_queue), self.name)
+        #print("merged log")
+        #print("REPLICA TIMESTAMP {} BEFORE: {}".format(self.name, self.replica_timestamp))
+        self.replica_timestamp = self.merge_timestamp(self.replica_timestamp, replica_timestamp)
+        self.timestamp_table[self.name] = replica_timestamp
+        #print("REPLICA TIMESTAMP {} AFTER: {}".format(self.name, self.replica_timestamp))
+        #print("merged timestamp")
         self.apply_stable_updates()
-        print("applied updates")
+        #print("applied updates")
         self.timestamp_table[name] = replica_timestamp
-        print("updated table")
+        #self.timestamp_table[self.name] = self.replica_timestamp
+        #print("updated table")
         self.eliminate_records()
-        print("eliminated records")
+        #print("eliminated records")
             
     def pick_random_gossip(self):
         others = []
@@ -192,18 +227,31 @@ class ReplicaManager:
         #print("my selection is {} i am {}".format(selection, self.name))
         lookup = self.ns.lookup(selection)
         return Pyro4.Proxy(lookup)
+
+    def random_event(self):
+        # if offline, there's a chance to go back online
+        if random.random() < PROB_REVERT:
+            print("reverted", self.name)
+        # randomly crash
+        if random.random() < PROB_CRASH:
+            print("crash", self.name)
+        elif random.random() < PROB_OVERLOAD:
+            print("overload", self.name)
+
         
     def replica_loop(self):
         print("Server {} online".format(self.name))
         while self.status is Status.ONLINE: # until the end of time
-            if len(self.update_queue) is not 0:
-                print("{} doing replica loop".format(self.name))
+            if len(self.update_queue) is not 0 or True:
+                #print("{} doing replica loop".format(self.name))
                 #print(len(self.update_queue
                 self.do_updates()
                 #print("done updates")
                 #time.sleep(random.random())
                 self.pick_random_gossip().gossip(self.update_queue, self.replica_timestamp, self.name)
-                print("returned")
+                print("{} has {}".format(self.name, self.replica_timestamp))
+                print("{} has {}".format(self.name, self.value_timestamp))
+                #self.random_event()
                 time.sleep(BACKGROUND_SLEEP) # less frequent gossips and loops
 
 
