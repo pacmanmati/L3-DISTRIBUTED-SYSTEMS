@@ -6,7 +6,7 @@ import Pyro4
 #import sys
 
 BACKGROUND_SLEEP = 2.5
-QUERY_SLEEP = 1.5
+REQ_SLEEP = 1.5
 
 @unique
 class Status(Enum):
@@ -29,6 +29,8 @@ class ReplicaManager:
         self.status = Status.ONLINE
         self.load = 0
         self.ns = nameserver
+        time.sleep(2) # sleep to make sure all servers are online before mapping
+        self.replicas = map_replicas()
         # create a thread to run outside the pyro requestLoop
         thread = threading.Thread(target=replica_loop(), args=[self])
         thread.start()
@@ -39,6 +41,12 @@ class ReplicaManager:
         for k in rms.keys():
             timestamp[k] = 0
         return timestamp
+
+    def merge_timestamp(self, t1, t2): # retain the values of t1 unless t2's are greater
+    for k in t1.keys():
+        if t1[k] < t2[k]:
+            t1[k] = t2[k]
+    return t1
     
     def read_file(self, filename):
         with open(filename) as f:
@@ -52,15 +60,18 @@ class ReplicaManager:
         rms = self.ns.list(metadata_all=["RM"])
         for k,v in rms.items():
             replicas[k] = Pyro4.Proxy(v)
-        # remove this server from the replicas
+        # remove this server from the replicas we will address
         del self.replicas[name]
         return replicas
 
     def do_updates(self):
         for update in update_queue:
             if update[0] not in self.executed_ops:
+                while !timestamp_test(self.value_timestamp, update[2]): # while our rm is behind the update
+                    time.sleep(REQ_SLEEP)
                 update(update[1][0], update[1][1], update[1][2])
-                self.value_timestamp[self.name] += 1 # increment value timestamp
+                #self.value_timestamp[self.name] += 1 # increment value timestamp
+                self.value_timestamp = merge_timestamp(self.value_timestamp, update[3]) # merge timestamps
                 self.executed_ops.append(update[0]) # add to executed operations
 
     def get_entries(self, movie_id):
@@ -90,16 +101,16 @@ class ReplicaManager:
         
     def queue_update(self, movie_id, user_id, rating, operation_id, timestamp):
         if operation_id not in executed_ops:
-            self.replica_timestamp[self.name] += 1
+            self.replica_timestamp[self.name] += 1 # increment replica timestamp
             our_ts = timestamp.copy()
-            our_ts[self.name] = 
+            our_ts[self.name] = self.replica_timestamp[self.name]
             update_queue.append((operation_id, (movie_id, user_id, rating), timestamp, our_ts))
-            # increment replica timestamp
 
+    def merge_log(log_old, log_new): # merge log2 into log1
+        
             
-    def gossip(self):
-        # remap replicas in case of offline servers
-        self.replicas = map_replicas()
+    def gossip(self, log, replica_timestamp):
+        merge_log(self.log, log)
 
 def replica_loop(self):
     while True: # until the end of time
