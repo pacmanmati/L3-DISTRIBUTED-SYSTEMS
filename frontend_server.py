@@ -3,7 +3,8 @@ import Pyro4
 
 @Pyro4.expose
 class Frontend:
-    def __init__(self, nameserver):
+    def __init__(self, nameserver, daemon):
+        self.daemon = daemon
         self.ns = nameserver
         self.replicas = self.map_replicas()
     def map_replicas(self):
@@ -24,18 +25,23 @@ class Frontend:
                 min_load_rm = k
         return ret_rm if ret_rm != None else raise Exception("find_rm() returns None")
 
-    def query(self, rm, movieid):
-        rm.queue_query(movieid)
-    def update(self, rm, movieid, id, rating):
-        rm.queue_update(movieid, id, rating)
+    def query(self, movie_id, timestamp):
+        rm = find_rm()
+        timestamp, rating = rm.query(movie_id, timestamp)
+        print("Movie with id {} is rated {}".format(movie_id, rating))
+        return timestamp, rm.name, rating
+        
+    def update(self, movie_id, user_id, rating, timestamp):
+        rm = find_rm()
+        timestamp = rm.queue_update(movie_id, user_id, rating, uuid.uuid4(), timestamp)
+        return timestamp, rm.name
         
 with Pyro4.Daemon() as daemon:
     ns = Pyro4.locateNS()
     frontend = Frontend(ns)
     uri = daemon.register(frontend)
     name = uuid.uuid4()
-    #name = input("Input a name for the server (it doesn't really matter, just has to be distinct - otherwise a connection to a server might be overwritten):")
     ns.register(name, uri, metadata=["F"])
     print("registered")
-    print(ns.list(return_metadata=True))
-    #daemon.requestLoop()
+    print(ns.list(return_metadata=True)) # debug
+    daemon.requestLoop()
