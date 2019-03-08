@@ -19,9 +19,15 @@ class Frontend:
     def find_rm(self):
         reps = list(self.replicas.keys())
         selection = reps[random.randrange(len(reps))]
-        print("my selection is",selection)
         lookup = self.ns.lookup(selection)
-        return Pyro4.Proxy(lookup)
+        prox = Pyro4.Proxy(lookup)
+        while prox.get_status() != 1: # if overloaded
+            print("Selected RM is unavailable, trying again...")
+            selection = reps[random.randrange(len(reps))]
+            lookup = self.ns.lookup(selection)
+            prox = Pyro4.Proxy(lookup)
+        print("my selection is",selection)
+        return prox
 
     def query(self, movie_id, timestamp):
         rm = self.find_rm()

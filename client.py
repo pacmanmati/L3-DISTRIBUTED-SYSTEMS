@@ -8,7 +8,7 @@ class Action(Enum):
     NEW_ID = 3
     QUIT = 4
 
-Pyro4.config.COMMTIMEOUT = 10
+Pyro4.config.COMMTIMEOUT = 1
     
 class Client:
     def init(self, frontend):
@@ -83,7 +83,7 @@ class Client:
         return self.movie_id
 
     def ask_rating(self):
-        self.rating = input("Enter a rating (out of ten):").strip()
+        self.rating = input("Enter a rating (out of 5):").strip()
         return self.rating
 
 ns = Pyro4.locateNS()
@@ -91,7 +91,7 @@ ns = Pyro4.locateNS()
 #frontend_uri = "PYROMETA:F"
 #frontend = Pyro4.Proxy(frontend_uri)
 frontend = Pyro4.Proxy(ns.lookup("frontend"))
-print(frontend)
+#print(frontend)
 
 client = Client()
 client.init(frontend)
