@@ -3,7 +3,7 @@ import time
 import uuid
 import threading
 import Pyro4
-#import sys
+import random
 
 BACKGROUND_SLEEP = 2.5
 REQ_SLEEP = 1.5
@@ -15,25 +15,26 @@ class Status(Enum):
 
 @Pyro4.expose
 class ReplicaManager:
-    def __init__(self, filename, name, nameserver):
+    def init(self, filename, name, nameserver):
         self.name = name
-        
+        self.ns = nameserver
+
         self.database = {} # movieID, userID : rating
-        self.value_timestamp = init_timestamp()
+        self.value_timestamp = self.init_timestamp()
         self.update_queue = []
-        self.replica_timestamp = init_timestamp()
+        self.replica_timestamp = self.init_timestamp()
         self.executed_ops = []
-        self.timestamp_table = init_timestamp()
-        
+        self.timestamp_table = self.init_timestamp()
+
         self.read_file(filename)
         self.status = Status.ONLINE
         self.load = 0
-        self.ns = nameserver
-        time.sleep(2) # sleep to make sure all servers are online before mapping
-        self.replicas = map_replicas()
-        # create a thread to run outside the pyro requestLoop
-        thread = threading.Thread(target=replica_loop(), args=[self])
+
+        #self.replicas = self.map_replicas() # not needed
+        thread = threading.Thread(target=self.replica_loop(), args=[]) # create a thread to run outside the pyro requestLoop
         thread.start()
+        daemon.requestLoop()
+
         
     def init_timestamp(self):
         timestamp = {}
@@ -43,10 +44,10 @@ class ReplicaManager:
         return timestamp
 
     def merge_timestamp(self, t1, t2): # retain the values of t1 unless t2's are greater
-    for k in t1.keys():
-        if t1[k] < t2[k]:
-            t1[k] = t2[k]
-    return t1
+        for k in t1.keys():
+            if t1[k] < t2[k]:
+                t1[k] = t2[k]
+        return t1
     
     def read_file(self, filename):
         with open(filename) as f:
@@ -60,15 +61,16 @@ class ReplicaManager:
         rms = self.ns.list(metadata_all=["RM"])
         for k,v in rms.items():
             replicas[k] = Pyro4.Proxy(v)
+        print(replicas)
         # remove this server from the replicas we will address
-        del self.replicas[name]
+        del replicas[name]
         return replicas
 
     def do_updates(self):
         for update in self.update_queue:
             if update[0] not in self.executed_ops:
                 #while !timestamp_test(self.value_timestamp, update[2]): # while our rm is behind the update
-                if !timestamp_test(self.value_timestamp, update[2]): # while our rm is behind the update
+                if not timestamp_test(self.value_timestamp, update[2]): # while our rm is behind the update
                     continue # skip if it isn't stable
                 #     time.sleep(REQ_SLEEP)
                 # if update[0] in self.executed_ops:
@@ -95,7 +97,7 @@ class ReplicaManager:
     
     def query(self, movie_id, timestamp):
         #while timestamp[self.name] > self.value_timestamp[self.name]: # while our replica is behind
-        while !timestamp_test(self.value_timestamp, timestamp): # while value_timestamp is behind the frontend's timestamp
+        while not timestamp_test(self.value_timestamp, timestamp): # while value_timestamp is behind the frontend's timestamp
             time.sleep(QUERY_SLEEP)
         # once we're out, our query can be responded to
         return self.value_timestamp, get_entries(movie_id)
@@ -113,9 +115,9 @@ class ReplicaManager:
     def eliminate_records():
         safe_to_remove = True
         safely_removable = []
-        for k in self.replicas.keys():
+        for k in self.value_timestamp.keys():
             for update in update_queue:
-                if !timestamp_test(self.timestamp_table[k][update[4]], update[3][update[4]]):
+                if not timestamp_test(self.timestamp_table[k][update[4]], update[3][update[4]]):
                     safe_to_remove = False
                     break
                 if safe_to_remove:
@@ -125,7 +127,7 @@ class ReplicaManager:
 
     def merge_log(log_old, log_new): # merge log2 into log1
         for update in log_new:
-            if update not in log_old and !timestamp_test(self.replica_timestamp, update[3]):
+            if update not in log_old and not timestamp_test(self.replica_timestamp, update[3]):
                 log_old.append(update)
 
     def apply_stable_updates():
@@ -148,26 +150,46 @@ class ReplicaManager:
             
     def gossip(self, log, replica_timestamp, name):
         merge_log(self.log, log)
+        print("merged")
         merge_timestamp(self.replica_timestamp, replica_timestamp)
         apply_stable_updates()
+        print("applied updates")
         self.timestamp_table[name] = replica_timestamp
         eliminate_records()
+        print("eliminated records")
             
+    def pick_random_gossip(self):
+        others = []
+        for k in self.value_timestamp.keys():
+            if k is not self.name:
+                others.append(k)
+        selection = others[random.randrange(len(others))]
+        print("my selection is",selection)
+        lookup = self.ns.lookup(selection)
+        return Pyro4.Proxy(lookup)
+        
+    def replica_loop(self):
+        print("Server {} online".format(self.name))
+        while self.status is Status.ONLINE: # until the end of time
+            self.do_updates()
+            print("done updates")
+            self.pick_random_gossip().gossip(self.update_queue, self.replica_timestamp, self.name)
+            print("returned")
+            time.sleep(BACKGROUND_SLEEP) # less frequent gossips and loops
 
-def replica_loop(self):
-    while True: # until the end of time
-        do_updates()
-        time.sleep(BACKGROUND_SLEEP) # less frequent gossips and loops
 
-    
+name = str(uuid.uuid4())
+#name = int(sys.argv[1])
+ns = Pyro4.locateNS()
+#rm = ReplicaManager("dataset/ratings.csv", name, ns)
+rm = ReplicaManager()
+            
 with Pyro4.Daemon() as daemon:
-    name = uuid.uuid4()
-    #name = int(sys.argv[1])
-    ns = Pyro4.locateNS()
-    rm = ReplicaManager("dataset/ratings.csv", name, ns)
     uri = daemon.register(rm)
     ns.register(name, uri, metadata=["RM"])
-    print("registered")
-    print(ns.list(return_metadata=True))
-    daemon.requestLoop()
+    time.sleep(2)
+    #print(ns.list(return_metadata=True))
+    rm.init("dataset/ratings.csv", name, ns)
+
+
 
