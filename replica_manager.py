@@ -117,8 +117,9 @@ class ReplicaManager:
             our_ts = timestamp.copy()
             our_ts[self.name] = self.replica_timestamp[self.name]
             self.update_queue.append((operation_id, (movie_id, user_id, rating), timestamp, our_ts, self.name))
+            return self.value_timestamp
 
-    def eliminate_records():
+    def eliminate_records(self):
         safe_to_remove = True
         safely_removable = []
         for k in self.value_timestamp.keys():
@@ -131,12 +132,12 @@ class ReplicaManager:
         for update in safely_removable:
             self.update_queue.remove(update)
 
-    def merge_log(log_old, log_new): # merge log2 into log1
+    def merge_log(self, log_old, log_new): # merge log2 into log1
         for update in log_new:
             if update not in log_old and not self.timestamp_test(self.replica_timestamp, update[3]):
                 log_old.append(update)
 
-    def apply_stable_updates():
+    def apply_stable_updates(self):
         # first we extract the stable updates
         stable_updates = []
         for update in self.update_queue:
@@ -148,16 +149,19 @@ class ReplicaManager:
             min_ts = stable_updates[0][2]
             min_upd = stable_updates[0]
             for i in range(len(stable_updates)):
-                if stable_updates[i][2] <= min_ts:
+                #if stable_updates[i][2] <= min_ts:
+                if self.timestamp_test(min_ts, stable_updates[i][2]):
                     min_ts = stable_updates[i][2]
                     min_ipd = stable_updates[i]
             # we have the min
             ordered_updates.append(min_upd) # [0] -> [...] increasing
             
     def gossip(self, log, replica_timestamp, name):
-        self.merge_log(self.log, log)
-        print("merged")
+        print("starting merge")
+        self.merge_log(self.update_queue, log)
+        print("merged log")
         self.merge_timestamp(self.replica_timestamp, replica_timestamp)
+        print("merged timestamp")
         self.apply_stable_updates()
         print("applied updates")
         self.timestamp_table[name] = replica_timestamp
@@ -170,7 +174,7 @@ class ReplicaManager:
             if k is not self.name:
                 others.append(k)
         selection = others[random.randrange(len(others))]
-        print("my selection is",selection)
+        print("my selection is {} i am {}".format(selection, self.name))
         lookup = self.ns.lookup(selection)
         return Pyro4.Proxy(lookup)
         
@@ -180,7 +184,7 @@ class ReplicaManager:
             if len(self.update_queue) is not 0:
                 self.do_updates()
                 print("done updates")
-                time.sleep(random.random())
+                #time.sleep(random.random())
                 self.pick_random_gossip().gossip(self.update_queue, self.replica_timestamp, self.name)
                 print("returned")
                 time.sleep(BACKGROUND_SLEEP) # less frequent gossips and loops

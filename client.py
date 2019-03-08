@@ -47,6 +47,7 @@ class Client:
                 timestamp, name = self.frontend.update(self.movie_id, self.user_id, self.rating, self.timestamp)
                 # merge timestamps
                 print("self timestamp", self.timestamp)
+                print("received timestamp", timestamp)
                 self.timestamp = self.merge_timestamp(self.timestamp, timestamp)
             elif self.action is Action.NEW_ID:
                 print("Your new id is {}.".format(self.ask_id()))
