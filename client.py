@@ -9,15 +9,15 @@ class Action(Enum):
     QUIT = 4
 
 class Client:
-    def __init__(self, frontend):
+    def init(self, frontend):
 
         self.frontend = frontend
         self.user_id = -1
         self.movie_id = -1
         self.rating = -1
         self.action = Action.NEW_ID
+        self.timestamp = self.init_timestamp()
         self.run()
-        self.timestamp = init_timestamp()
 
     def merge_timestamp(self, t1, t2): # retain the values of t1 unless t2's are greater
         for k in t1.keys():
@@ -27,34 +27,40 @@ class Client:
 
     def init_timestamp(self):
         timestamp = {}
-        for k in self.frontend.replicas.keys():
+        for k in self.frontend.get_replicas().keys():
             timestamp[k] = 0
         return timestamp
         
     def run(self):
         while self.action is not Action.QUIT:
             if self.action is Action.QUERY:
-                ask_movie_id()
+                self.ask_movie_id()
                 timestamp, name, value = self.frontend.query(self.movie_id, self.timestamp)
                 # merge timestamps
-                self.timestamp = merge_timestamp(self.timestamp, timestamp)
+                self.timestamp = self.merge_timestamp(self.timestamp, timestamp)
+                for entry in value:
+                    #print(entry)
+                    print("User with id {} gave movie {} a rating of {} stars".format(entry[1], entry[0], entry[2]))
             elif self.action is Action.UPDATE:
-                ask_movie_id()
-                ask_rating()
+                self.ask_movie_id()
+                self.ask_rating()
                 timestamp, name = self.frontend.update(self.movie_id, self.user_id, self.rating, self.timestamp)
                 # merge timestamps
-                self.timestamp = merge_timestamp(self.timestamp, timestamp)
+                print("self timestamp", self.timestamp)
+                self.timestamp = self.merge_timestamp(self.timestamp, timestamp)
             elif self.action is Action.NEW_ID:
                 print("Your new id is {}.".format(self.ask_id()))
             self.ask_action()
 
     def ask_action(self):
-        while self.action < 1 or self.action > 4:
-            self.action = Action(int(input("Select an action:\n" \
-                                           "1 - Retrieve a movie rating,\n" \
-                                           "2 - Submit a movie rating,\n" \
-                                           "3 - Change user id,\n" \
-                                           "4 - Quit.")))
+        question = "Select an action:\n" \
+                   "1 - Retrieve a movie rating,\n" \
+                   "2 - Submit a movie rating,\n" \
+                   "3 - Change user id,\n" \
+                   "4 - Quit.\n> "
+        self.action = Action(int(input(question)))
+        while self.action.value < 1 or self.action.value > 4:
+            self.action = Action(int(input(question)))
         return self.action
 
     def ask_id(self):
@@ -69,8 +75,12 @@ class Client:
         self.rating = input("Enter a rating (out of ten):").strip()
         return self.rating
 
+ns = Pyro4.locateNS()
 # create a frontend proxy
-frontend_uri = "PYROMETA:F"
-frontend = Pyro4.Proxy(frontend_uri)
+#frontend_uri = "PYROMETA:F"
+#frontend = Pyro4.Proxy(frontend_uri)
+frontend = Pyro4.Proxy(ns.lookup("frontend"))
+print(frontend)
 
-Client(frontend)
+client = Client()
+client.init(frontend)
